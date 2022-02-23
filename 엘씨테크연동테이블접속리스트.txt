@@ -1,0 +1,22 @@
+============================================
+Select 용 테이블
+============================================
+EMR_M_CHARTCHECKOUT
+EMR_M_CHARTKIND
+
+BTM_PATIENT
+BTC_EMPLOYEE
+BTC_WARD
+BTC_DEPT
+
+PDO_MASTER
+PDI_MASTER
+ORD_DIAGNOSIS
+
+============================================
+Insert 용 테이블
+============================================
+EMR_M_CHARTKIND
+EMR_M_LOGMASTER
+EMR_M_CHARTMASTER
+EMR_M_CHARTMASTER_IMG

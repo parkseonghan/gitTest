@@ -1,0 +1,245 @@
+
+========================================================================================================================
+전자동의서 생성된 이미지 서버등록 경로
+========================================================================================================================
+\\서버IP\ciemrchart\Chart
+
+--아래쿼리로 IP정보를 얻어옵니다.
+SELECT SETTINGVALUE 
+FROM EMR_M_SETTING 
+WHERE BASECODE = 'PATH' 
+AND DETAILCODE = 'CHART'
+
+--이미지 파일 저장예시
+\\서버Ip\ciemrchart\Chart\ALLCHART\DATA\2019\201902\20190227\00020759_4903046_C3052_00000_00.jpg
+           경로                         년도 년도월 년도월일 파일명칭 (차트번호 + 차트시쿼스 + 서식코드 + 00000 + 01(시퀀스).JPG)
+
+		   
+		   
+		   
+		   
+
+======EMR 데이터 생성(1)===================================================================================================
+EMR_M_CHARTMASTER Insert (1:1)
+========================================================================================================================
+SELECT SEQ_CHARTMASTER.NEXTVAL FROM DUAL
+
+SELECT *
+  FROM EMR_M_CHARTMASTER
+ WHERE PTNO = '00020759'
+   AND DELFLAG = '0'
+   AND WRITEYMD = '2019-02-27';
+
+======EMR 데이터 생성(2)===================================================================================================
+EMR_M_CHARTMASTER_IMG Insert (1:이미지 건수N)
+========================================================================================================================
+SELECT *
+  FROM EMR_M_CHARTMASTER_IMG
+ WHERE CHARTSEQ = 4903046;
+
+ 
+ 
+ 
+ 
+======EMR 서식코드 생성시===================================================================================================
+서식지 코드 생성 시 Insert 테이블 정보 (EMR_M_CHARTKIND)
+========================================================================================================================
+
+
+
+
+
+
+======동의서 클릭시 로그테이블 데이터 생성========================================================================================
+동의서 접근 및 작성 완료 시 log 테이블 정보 (Insert EMR_M_LOGMASTER)
+========================================================================================================================
+--작성할때 WorkGb:WRITE	WorkType:WRTCHART
+--조회할때 WorkGb:READ  	WorkType:WRTCHART
+
+INSERT
+  INTO EMR_M_LOGMASTER 
+      (LOGSEQ,
+       USERID,
+       LOGDATE,
+       WORKGB,
+       WORKTYPE,
+       WORKOBJ,
+       CHARTCD,
+       PTNO,
+       IPDOPD,
+       ACCOUNTDATE,
+       DEPTCODE,
+       DRCODE,
+       COSEQ,
+       IP)
+VALUES (SEQ_LOGMASTER.NEXTVAL,
+       :USERID,      --사용자 ID
+       SYSDATE,
+       'WRITE',      --해당 문자열
+       'WRTCHART',   --해당 문자열
+       :CHARTSEQ,    --Emr_M_ChartMaster에 ChartSeq참고
+       :CHARTCD,     --서식코드
+       :PTNO,        --차트번호
+       :IPDOPD,      --외래입원구별
+       :ACCOUNTDATE, --서식지 적용일자
+       :DEPTCODE,    --부서코드
+       :DRCODE,      --의사코드
+       :COSEQ,       --Coseq 아래쿼리 참고
+       :IP) ;        --Ip
+
+
+SELECT A.COSEQ
+  FROM EMR_M_CHARTCHECKOUT A, 
+       BTM_PATIENT B, 
+       BTC_EMPLOYEE C, 
+       BTC_DOCTOR D 
+ WHERE A.USERID = 'DS'
+   AND SYSDATE BETWEEN A.STARTDATE AND A.ENDDATE 
+   AND A.PTNO = '00006474'
+
+
+
+   
+   
+======냉동일 , 채취일 , 보관일===============================================================================================
+채취일자 OpuDate  2019-04-29
+보관일 OpuDate 1년을 더하고 한달을 뺌. EX(2020-03-29)
+========================================================================================================================
+
+--OpuDate 채취일자
+--ACCOUNTDATE 냉동일자
+--LASTDATE 보관일자
+Select OPUDATE, ACCOUNTDATE, LASTDATE, A.* 
+  From IVF_CRYOMASTER A
+ Where OpuDate = '채취일자' 
+   And CRYOFLAG = '1'  --'0:sperm 1:EMBRYO
+   And PTNO = '차트번호'
+;
+;
+
+
+
+
+--FemaleBloodType 아내혈액형         1:A     2:B     3:AB     4:O
+--FemaleRHType    아내혈액형 RH Type 1:RH(+) 2:RH(-)
+--MaleBloodType   남편혈액형         1:A     2:B     3:AB     4:O
+--MaleRHType      남편혈액형 RH Type 1:RH(+) 2:RH(-)
+
+SELECT * 
+    FROM ORD_ChoJinInterView 
+   WHERE PTno = '차트번호' 
+ORDER BY WriteDate 
+;
+
+
+
+========================================================================================================================
+외래 대기자 리스트 선택후 상세정보
+========================================================================================================================
+환자등록번호                        SELECT O.PTNO, P.SNAME, O.AGE, P.BIRTHDAY, P.JUMIN1, O.SEX,
+환자명                               DECODE(TRIM(FEMALEBLOODTYPE), '1', 'A', '2', 'B' , '3', 'AB', '4', 'O') AS FEMALEBLOODTYPE,
+나이                               O.DEPTCODE, '진료과명', D.IDNUMBER, C.DRNAME, '' AS 병동, '' AS 병실, '' AS 입원일자,
+환자 생년월일                               O.ACCOUNTDATE AS 진료일자, P.JUSO, NVL(P.HANDPHONE, P.TEL) AS HANDPHONE,
+주민등록번호 앞자리                               '' AS 알러지, E.DXCODE, 'O' AS 내원구분, '' AS 병상번호,  
+성별                               MALEPTNO AS 배우자등록번호,   MALESNAME AS  배우자성명,  '배우자나이' , '배우자생년월일',   MALEJUMINNO1 AS 배우자주민번호앞자리,
+형액형                               '성별' , DECODE(TRIM(MALEBLOODTYPE), '1', 'A', '2', 'B' , '3', 'AB', '4', 'O') AS MALEBLOODTYPE, F.JUSO,  MALEHANDPHONE
+진료과 코드                          FROM PDO_MASTER O,
+진료과 명                               BTM_PATIENT P,
+담당의사 아이디                               BTC_DOCTOR C,
+담당의사 명                               BTC_EMPLOYEE D, 
+병동                               ORD_DIAGNOSIS E,
+병실                               ORD_CHOJININTERVIEW F
+입원일자                         WHERE 1 = 1
+진료일자                           AND O.PTNO = '00159599' --차트번호
+주소                           AND O.PTNO = P.PTNO
+환자 핸드폰번호                           AND O.ACCOUNTDATE = '2019-04-30' --접수일자
+알레르기 및 간염                            AND O. DRCODE= C. DRCODE
+(주)진단명                           AND D.DRCODE = C.DRCODE 
+내원구분                           AND O.PTNO = E.PTNO
+병상번호                           AND O.ACCOUNTDATE = E.STARTDATE
+배우자 등록번호                           AND E.DISPSEQ = 1
+배우자 성명                           AND O.PTNO = F.PTNO
+나이
+배우자 생년월일
+주민등록번호 앞자리
+성별
+형액형
+주소
+배우자 핸드폰번호   
+
+
+
+
+
+========================================================================================================================
+초진환자 인터뷰 B형간염, C형간염, 매독, 임질, 에이즈
+========================================================================================================================
+SELECT BHEPATITIS,
+       CHEPATITIS,
+       DISEASE09 ,
+       MALEHEPATITIS ,
+       DISEASE10,
+       DISEASE101REMARK,
+       DISEASE102REMARK,
+       A.*
+  FROM ORD_CHOJININTERVIEW A
+ WHERE 1 =1
+   AND PTNO = '00000999'
+
+[환자 ]
+B형간염 BHepatitis = '1' 간염일경우 1 아닌경우 0
+C형간염 CHepatitis = '1' 간염일경우 1 아닌경우 0
+매독    DISEASE09 = 0
+임질    DISEASE09 = 1
+에이즈  DISEASE09 = 2
+
+[배우자]
+B형간염 MALEHEPATITIS = '0'
+C형간염 MALEHEPATITIS = '1'
+매독    MALEHEPATITIS = '2'
+임질    MALEHEPATITIS = '3'
+에이즈  MALEHEPATITIS = '4'
+
+[알러지] 
+조영제 DISEASE10 = 0
+약물   DISEASE10 = 1
+기타   DISEASE10 = 2
+
+약물 텍스트입력 Disease101Remark
+기타 텍스트입력 Disease102Remark
+
+
+
+
+
+========================================================================================================================
+--시험관 대상자
+========================================================================================================================
+ SELECT  A.*, B.Sname, B.Sex, B.Jumin1, B.Jumin2, 
+         '' SkipFlag,   
+        (select ptno from pdi_master where ptno = A.ptno and rownum = 1) PDI_MST_Flag, 
+         C.ETDate IVF_ETDay, D.PartFlag, D.OutFlag 
+   FROM  ORD_SHEETMASTER A, BTM_PATIENT B, IVF_MASTER C, 
+        (SELECT PTno, MAX(PartFlag) PartFlag, MAX(OutFlag) OutFlag FROM IVF_DID WHERE AccountDate = '2019-05-14' AND PartFlag IN ('0', '1') GROUP BY PTno) D 
+  WHERE (A.OpuDate  = '2019-05-14'  
+     OR  A.ETDate   = '2019-05-14'  
+     OR  A.TETDate  = '2019-05-14'  ) 
+    --AND ( A.DRCODE = " & Trim$(s_IF_DrList) & " ) --주치의 Drcode 필터 조건
+    AND  A.PTno         = B.PTno            
+    AND  A.SeqNumber    = C.SeqNumber(+)    
+    AND  A.PTno         = D.PTno(+)         
+  ORDER  BY A.ETDate, A.OpuDate, A.DeptCode, A.DrCode, A.PTno 
+
+========================================================================================================================
+--인공수정 대상자
+========================================================================================================================
+ SELECT A.*,    
+        B.Sname, B.Sex, B.Jumin1, B.Jumin2, 
+        (select ptno from pdi_master where ptno = A.ptno and rownum = 1) PDI_MST_Flag, 
+        C.PartFlag, C.OutFlag 
+   FROM ORD_SHEETMASTER A, BTM_PATIENT B, (SELECT PTno, MAX(PartFlag) PartFlag, MAX(OutFlag) OutFlag FROM IVF_DID WHERE AccountDate = '2019-05-14' AND PartFlag = '2' GROUP BY PTno) C 
+  WHERE (A.AIHDate = '2019-05-14' OR A.AIHDate2 = '2019-05-14') 
+    --AND ( A.DRCODE = " & Trim$(s_IF_DrList) & " )  --주치의 Drcode 필터 조건
+    AND A.PTno = B.PTno 
+    AND A.PTno = C.PTno(+) 
+  ORDER BY A.AIHDate, A.AIHProcFlag, A.DeptCode, A.DrCode, A.PTno 

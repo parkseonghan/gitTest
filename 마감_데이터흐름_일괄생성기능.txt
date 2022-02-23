@@ -1,0 +1,419 @@
+--최종마감일자 (마감완료시 FLAGOPD FLAGIPD *로 변경)
+SELECT MAX(JOBDATE)
+  FROM BTC_JOBDATE
+ WHERE JOBDATE LIKE '2020-03%'
+   AND FLAGOPD = '*'
+;
+
+--테이블 쿼리로그
+  SELECT * 
+    FROM SQL_LOG 
+   WHERE LOGDATE = '2019-07-19'
+ORDER BY WRITETIME DESC;   
+   
+
+   	일마감 관련 데이터 변경
+	
+1. 계산중 -> 가퇴원으로 변경 
+   Update PDI_Master Set AmFlag0 = '3' --가퇴원
+	               Where AmFlag0 = '2' --계산중
+	
+2. 재원환자 PDI_MasterBack 
+   GbBackUp = 'M' 생성   AccountDate = '마감일자'
+	
+3. 재원환자 수납내역
+   PDI_SlipBack  GbBackUp = 'B' 생성
+	
+4. 당일 퇴원환자 PDI_MasterBack, PDI_SlipBack, PDI_CashBack (AmFlag0 = '1') -> GbBackup : 'T' 생성
+	
+5. 당일 퇴원환자 PDI_Master, PDI_Slip, PDI_Cash (AmFlag0 = '1') 데이터 삭제
+
+
+'========================================================================================================================
+'마감 일괄생성 하기
+'========================================================================================================================
+
+Private Sub cmdStart_Click()
+   
+    Dim MsgNo   As Integer
+    Dim I%
+    
+    
+    Do Until dtpDate.Value > "2019-07-18"
+        dtpDate.Value = Format(DateAdd("d", 1, dtpDate.Value), "YYYY-MM-DD")
+        
+        Set MAGAM = New ClsMagam                    '2015-07-15 kongzz
+    MAGAM.MagamDate = dtpDate.Value
+    
+    If PreDate_Magam_Check = False Then Exit Sub  '이전 일자 마감 여부 check
+    
+    '2012-05-02 kongzz
+    If Date = dtpDate.Value Then
+        If MsgBox("당일자 마감을 돌리시겠습니까?", vbInformation + vbYesNo + vbDefaultButton2, Me.Caption) = vbNo Then
+            Set MAGAM = Nothing
+            Exit Sub
+        End If
+    End If
+                
+        
+    For I = 1 To 13
+        CoolBar1.Bands(I).Image = 0
+        CoolBar2.Bands(I).Caption = ""
+    Next I
+    
+    CoolBar1.Refresh
+    CoolBar2.Refresh
+    
+    
+    If gsCrmNo = CRM_메드윌병원 Or gsCrmNo = CRM_함양성심병원 Or gsCrmNo = CRM_건양대부여병원 Then
+    
+    Else
+    
+        If Lock_Check = True Then
+            frmLockView.Show vbModal
+            Exit Sub
+        End If
+    
+    End If
+    
+    'GoSub JobDate_Check '  각종마감 error check
+    
+    dtpDate.Enabled = False
+    
+'    If FlagRepeat Then     '회계 일자의 마감 작업 재실행 Flag
+'        MsgBox "이미 해당일자 마감작업을 하셨습니다.", , "확인": Exit Sub
+        
+'2000-05-01 수정 다시 마갑 돌릴 수 없도록 막음. 마감이후 퇴원자 데이터는 SLIP, CASH는 회계일자 넘어가고 MASTER는 퇴원일자가
+'당일로 잡히므로 다시 작업했을 때 데이터 문제를 일으킬 수 있음.
+'        If MsgBox("이미 해당일자 마감작업을 하셨습니다. 다시 작업하시겠습니까?", vbQuestion + vbYesNo, "확인") = vbYes Then
+'            StatusBar1.Panels(1).Text = "이전 마감 작업 취소중..."
+'
+'            AdoCn.BeginTrans
+'            Call ExecADO("Set Transaction Use Rollback Segment RBS11")
+'
+'            If Undo_Magam = False Then
+'                AdoCn.RollbackTrans
+'                MsgBox "마감 취소 작업이 이루어 지지 않아 다시 마감 작업 하실 수 없습니다.", , "확인"
+'                Exit Sub
+'            Else
+'                AdoCn.CommitTrans
+'            End If
+'        Else
+'            Exit Sub
+'        End If
+'    End If
+    
+    If Lock_Insert(80000002, "00000000", "PMI", "AllMagam", "외래, 입원 일일 마감 프로그램 사용중") = False Then
+        dtpDate.Enabled = True
+        StatusBar1.Panels(1).Text = ""
+        Set MAGAM = Nothing
+        Exit Sub
+    End If
+    
+    
+    If Not MagamStart Then     '마감 Start Flag Insert
+        Call Lock_Delete(80000002, "00000000")
+        MsgBox "마감 시작 Flag Setting에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+               "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+        StatusBar1.Panels(1).Text = ""
+        dtpDate.Enabled = True
+        Set MAGAM = Nothing
+        Exit Sub
+    End If
+
+    Call ExecADO("Commit")
+
+    Screen.MousePointer = vbHourglass
+    
+    Call WriteHistory(dtpDate.Value, Me.Caption)
+    
+    AdoCn.BeginTrans
+    
+    'If bUser_RBS Then Call ExecADO("Set Transaction Use Rollback Segment RBS11")
+    
+    If bUser_RBS11 = True Then Call ExecADO("Set Transaction Use Rollback Segment RBS11")
+    
+    
+    '-------------------------------------------------------------------   2007.08.24 김기훈 외래,입원 마감 분리 (좋은삼정병원 요청)
+'    If Not Opd_Magam2 Then MsgNo = 1:       GoSub Err_Rtn
+'    If Not Opd_Magam3 Then MsgNo = 2:       GoSub Err_Rtn
+'    If Not Ipd_UpdateM Then MsgNo = 12:     GoSub Err_Rtn
+'    If Not Ipd_BackUpM Then MsgNo = 3:      GoSub Err_Rtn
+'    If Not Ipd_BackupS Then MsgNo = 4:      GoSub Err_Rtn
+'    If Not Ipd_BackupC Then MsgNo = 5:      GoSub Err_Rtn
+'    If Not Ipd_CreateTM Then MsgNo = 6:     GoSub Err_Rtn
+'    If Not Ipd_CreateTS Then MsgNo = 7:     GoSub Err_Rtn
+'    If Not Ipd_CreateTC Then MsgNo = 8:     GoSub Err_Rtn
+'    If Not Ipd_DeleteTS Then MsgNo = 9:     GoSub Err_Rtn
+'    If Not Ipd_DeleteTC Then MsgNo = 10:    GoSub Err_Rtn
+'    If Not Ipd_DeleteTM Then MsgNo = 11:    GoSub Err_Rtn
+'    If Not Ipd_EndDateIll Then MsgNo = 13:  GoSub Err_Rtn
+'    If Not Ipd_Magam2 Then MsgNo = 14:      GoSub Err_Rtn
+    'If gsCrmNo <> CRM_전주한나 Then '2015-07-09/정지혜 마감을 익일 오전에 돌려 문제 소지 있음
+        'If Not Ipd_ARCQTY Then MsgNo = 15:     GoSub Err_Rtn
+    'End If
+    
+    If optSw(0).Value = True Or optSw(1).Value = True Then  '전체 or 외래
+        If Not Opd_Magam2 Then MsgNo = 1:       GoSub Err_Rtn
+        If Not Opd_Magam3 Then MsgNo = 2:       GoSub Err_Rtn
+    End If
+    
+    If optSw(0).Value = True Or optSw(2).Value = True Then  '전체 or 입원
+    
+        If Not Ipd_UpdateM Then MsgNo = 12:     GoSub Err_Rtn
+        
+        If Not Ipd_BackUpM Then MsgNo = 3:      GoSub Err_Rtn
+        If Not Ipd_BackupS Then MsgNo = 4:      GoSub Err_Rtn
+        If Not Ipd_BackupC Then MsgNo = 5:      GoSub Err_Rtn
+    
+        If Not Ipd_CreateTM Then MsgNo = 6:     GoSub Err_Rtn
+        If Not Ipd_CreateTS Then MsgNo = 7:     GoSub Err_Rtn
+        If Not Ipd_CreateTC Then MsgNo = 8:     GoSub Err_Rtn
+        
+        If Not Ipd_DeleteTS Then MsgNo = 9:     GoSub Err_Rtn
+        If Not Ipd_DeleteTC Then MsgNo = 10:    GoSub Err_Rtn
+        If Not Ipd_DeleteTM Then MsgNo = 11:    GoSub Err_Rtn
+        
+        If Not Ipd_EndDateIll Then MsgNo = 13:  GoSub Err_Rtn
+        
+        If Not Ipd_Magam2 Then MsgNo = 14:      GoSub Err_Rtn
+    
+    End If
+    
+    '-------------------------------------------------------------------
+    AdoCn.CommitTrans
+    
+    
+    Screen.MousePointer = vbDefault
+    
+    Call Lock_Delete(80000002, "00000000")
+    
+    
+    '[090415 신승재]불필요하께 쌓여있는데이터 삭제처리(자격조회M1/M2, 쿼리분석테이블) - 에러나도 지장없으니 commit후에 작업하자.
+    
+    If gsCrmNo <> CRM_광주서광 Then     ' 서광병원 일단 막음....   마감시 다운되는 현상....  2009.10.20 박세환 수정
+'If gsHosName <> "서광병원" Then '종병변경으로 인한 요양기관번호 나오기전까지.....   2010-04-04
+        Call Garbage_Data_Delete
+    End If
+    
+    
+'''2014-01-22/김경민 ARC작업이후에 지우도록 주석처리 합니다.
+'''     '2013-03-28/김경민
+'''    ExecADO ("DELETE ORD_RegularDiet WHERE ptno not in (select ptno from pdi_master)")  '식이처방 삭제
+    
+'    MsgBox dtpDate.Value & "일자 마감 작업이 " & vbCrLf & _
+'           "성공적으로 수행되었습니다.", , "확인"
+    
+    StatusBar1.Panels(1).Text = ""
+    
+    dtpDate.Enabled = True
+    
+    Set MAGAM = Nothing
+    
+    '2012-04-06 kongzz : DUR v1.3 제거 관련
+   '2011-05-26/김경민
+'   If gsDurCheck20080401Flag <> "5" Then
+'        '****************************************************************************
+'        '2009-04-01 DUR임부금기변경로직
+'        '****************************************************************************
+'        strsql = ""
+'        strsql = strsql & "SELECT A.*, A.ROWID "
+'        strsql = strsql & "  FROM ORD_DurMaster A"
+'        strsql = strsql & " WHERE A.SENDFLAG = '0' "
+'        strsql = strsql & "   AND A.ORDERDATE = '" & dtpDate.Value & "' "
+'        strsql = strsql & "    AND A.RESULTTYPE <> '5' "
+'        strsql = strsql & "    AND A.BI  in ('11','21','12','16','17','27','26') "
+'        strsql = strsql & " ORDER BY A.OrderDate, A.PTNO, A.OrderID "
+'        If OpenADO(strsql, 0) Then
+'
+'            MsgBox "금일 DUR전송 할 내역이 있습니다!" & vbCrLf & vbCrLf & " DUR전송창으로 자동연결됩니다!!", vbInformation, "DUR전송"
+'
+'            Unload Me
+'            frmDURMagam.Show
+'        End If
+'        '****************************************************************************
+'    End If
+    
+'    Exit Sub
+'
+'
+Err_Rtn:
+'
+'    Screen.MousePointer = vbDefault
+'    AdoCn.RollbackTrans
+'    Call Lock_Delete(80000002, "00000000")
+'    Select Case MsgNo
+'        Case 1, 2
+'            MsgBox "외래 마감에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 3
+'            MsgBox "당일 재원 Master 데이터 복사에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 4
+'            MsgBox "당일 재원 Slip 데이터 복사에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 5
+'            MsgBox "당일 재원 현금 데이터 복사에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 6
+'            MsgBox "당일 퇴원 환자 Master 데이터 생성에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 7
+'            MsgBox "당일 퇴원 환자 Slip 데이터 생성에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 8
+'            MsgBox "당일 퇴원 환자 현금 데이터 생성에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 9
+'            MsgBox "당일 퇴원 환자 Slip 데이터 삭제에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 10
+'            MsgBox "당일 퇴원 환자 현금 데이터 삭제에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 11
+'            MsgBox "당일 퇴원 환자 Master 데이터 삭제에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 12
+'            MsgBox "당일 가퇴원 환자 Update 작업에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 13
+'            MsgBox "당일 퇴원 환자 상병에 종료일자 Setting 작업에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 14
+'            MsgBox "입원 마감에 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'        Case 15
+'            MsgBox "ARCQTY정산 오류가 있어 마감이 취소되었습니다." & vbCrLf & _
+'                   "문제 해결 후 마감작업을 다시 하시기 바랍니다.", , "확인"
+'    End Select
+'    StatusBar1.Panels(1).Text = ""
+'    dtpDate.Enabled = True
+'    Set MAGAM = Nothing
+'
+'    Exit Sub
+'
+'Return
+
+
+'JobDate_Check:
+
+'    Dim nMagam          As Integer
+'    Dim strHoliDay      As String
+'    Dim strIpdMaGam     As String
+'    Dim strOpdMaGam     As String
+'    Dim strAccountDate1 As String
+'
+'    strSQL = "  SELECT  JobDate, FlagIpd, FlagOpd, HoliDay "
+'    strSQL = strSQL & "  FROM  BTC_JobDate "
+'    strSQL = strSQL & " WHERE  JobDate = '" & dtpDate.Value & "' "
+'
+'    If Not OpenADO(strSQL, 0) Then
+'        MsgBox "회계일자를 찾을 수 없습니다.", vbCritical, "마감일자 Error"
+'        dtpDate.SetFocus
+'        Set MAGAM = Nothing
+'        Exit Sub
+'    End If
+'
+'    strHoliDay = AdoRs(0).Fields("HoliDay") & ""
+'    strIpdMaGam = AdoRs(0).Fields("FlagIpd") & ""
+'    strOpdMaGam = AdoRs(0).Fields("FlagOpd") & ""
+'
+'    If Trim(strIpdMaGam) = "*" Or Trim(strOpdMaGam) = "*" Then
+'        If gstrSysDate > dtpDate.Value Then    '과거 마감을 다시 할 경우 Check
+'            strAccountDate1 = Format(DateAdd("d", 1, dtpDate.Value), "YYYY-MM-DD")
+'
+'            strSQL = " SELECT  JobDate, FlagIpd, FlagOpd, HoliDay "
+'            strSQL = strSQL & "  FROM  BTC_JobDate "
+'            strSQL = strSQL & " WHERE  JobDate Between '" & strAccountDate1 & "' "
+'            strSQL = strSQL & "                    And '" & gstrSysDate & "' "
+'
+'            If OpenADO(strSQL, 0) Then
+'                Do Until AdoRs(0).EOF
+'                    strHoliDay = AdoRs(0).Fields("HoliDay") & ""
+'                    strIpdMaGam = AdoRs(0).Fields("FlagIpd") & ""
+'                    strOpdMaGam = AdoRs(0).Fields("FlagOpd") & ""
+'
+'                    If optSw(0).Value = True Or optSw(1).Value = True Then  '전체 or 외래
+'                        If Trim(strOpdMaGam) = "*" Then
+'                            MsgBox "이미 해당 일자 이후까지 외래 마감 작업을 하셨습니다." & vbCrLf & _
+'                                    "마감 작업을 다시하실 수 없습니다.", , "마감작업 재수행 확인"
+'
+'                            Set MAGAM = Nothing
+'                            Exit Sub
+'                        End If
+'                    End If
+'
+'                    If optSw(0).Value = True Or optSw(2).Value = True Then  '전체 or 입원
+'                        If Trim(strIpdMaGam) = "*" Then
+'                            MsgBox "이미 해당 일자 이후까지 입원 마감 작업을 하셨습니다." & vbCrLf & _
+'                                    "마감 작업을 다시하실 수 없습니다.", , "마감작업 재수행 확인"
+'
+'                            Set MAGAM = Nothing
+'                            Exit Sub
+'                        End If
+'                    End If
+'
+'                    AdoRs(0).MoveNext
+'                Loop
+'                AdoRs(0).Close
+'            End If
+'
+'        ElseIf gstrSysDate < dtpDate.Value Then
+'            MsgBox "미래 일자의 마감을 미리 하실수는 없습니다.", , "확인"
+'            Set MAGAM = Nothing
+'            Exit Sub
+'        ElseIf gstrSysDate = dtpDate.Value Then
+'            If Format(Now, "hh:MM") < "12:00" Then
+'                MsgBox "오전 12시 이전에는 당일 마감을 하실 수 없습니다.", , "확인"
+'                Set MAGAM = Nothing
+'                Exit Sub
+'            End If
+'        End If
+'
+'        MsgBox "이미 해당 회계 일자의 마감 작업을 하셨습니다." & vbCrLf & _
+'               "마감 작업을 다시하실 수 없습니다.", , "마감작업 재수행 확인"
+'
+'        Set MAGAM = Nothing
+'        Exit Sub
+'    ElseIf Trim(strIpdMaGam) = "S" Or Trim(strOpdMaGam) = "S" Then
+'        If optSw(0).Value = True Or optSw(1).Value = True Then  '전체 or 외래
+'            If Trim(strOpdMaGam) = "S" Then
+'                MsgBox "해당 일자 외래 마감 중 오류로 중단된 상태입니다." & vbCrLf & _
+'                       "마감 작업을 다시하실 수 없습니다.", , "마감작업 재수행 확인"
+'
+'                Set MAGAM = Nothing
+'                Exit Sub
+'            End If
+'        End If
+'
+'        If optSw(0).Value = True Or optSw(2).Value = True Then  '전체 or 입원
+'            If Trim(strIpdMaGam) = "S" Then
+'                MsgBox "이미 해당 일자 이후까지 입원 마감 작업을 하셨습니다." & vbCrLf & _
+'                        "마감 작업을 다시하실 수 없습니다.", , "마감작업 재수행 확인"
+'
+'                Set MAGAM = Nothing
+'                Exit Sub
+'            End If
+'        End If
+'
+'    Else
+'        If gstrSysDate < dtpDate.Value Then
+'            MsgBox "미래 일자의 마감을 미리 하실수는 없습니다.", , "확인"
+'            Set MAGAM = Nothing
+'            Exit Sub
+'        ElseIf gstrSysDate = dtpDate.Value Then
+'            If Format(Now, "hh:MM") < "12:00" Then
+'                MsgBox "오전 12시 이전에는 당일 마감을 하실 수 없습니다.", , "확인"
+'                Set MAGAM = Nothing
+'                Exit Sub
+'            End If
+'        End If
+'    End If
+
+'Return
+
+    Loop
+    
+    
+
+End Sub
